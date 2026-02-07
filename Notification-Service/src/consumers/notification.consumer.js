@@ -8,6 +8,7 @@ const startConsumer = async () => {
 
   await consumer.subscribe({ topic: "user-events" });
   await consumer.subscribe({ topic: "post-events" });
+  await consumer.subscribe({ topic: "chat-events" });
 
   await consumer.run({
     eachMessage: async ({ message }) => {
@@ -47,6 +48,16 @@ const startConsumer = async () => {
             message: "Your post was deleted",
           };
           break;
+
+        case "CHAT_MESSAGE_CREATED":
+          notification = {
+            userId: event.data.toUserId,
+            type: "CHAT_MESSAGE_CREATED",
+            message: event.data.fromUserName
+              ? `New message from ${event.data.fromUserName}`
+              : `New message from user ${event.data.fromUserId}`,
+          };
+          break;
       }
 
       if (notification) {
@@ -62,34 +73,3 @@ const startConsumer = async () => {
 };
 
 module.exports = startConsumer;
-
-// const kafka = require("../config/kafka");
-
-// const consumer = kafka.consumer({ groupId: "notification-group" });
-
-// const startConsumer = async () => {
-//   await consumer.connect();
-
-//   await consumer.subscribe({ topic: "user-events" });
-//   await consumer.subscribe({ topic: "post-events" });
-
-//   await consumer.run({
-//     eachMessage: async ({ topic, message }) => {
-//       const event = JSON.parse(message.value.toString());
-
-//       if (event.event === "USER_CREATED") {
-//         console.log(
-//           `New User Registered: ${event.data.name} (${event.data.email})`,
-//         );
-//       }
-
-//       if (event.event === "POST_CREATED") {
-//         console.log(
-//           `New Post Created by User ${event.data.userId}: ${event.data.content}`,
-//         );
-//       }
-//     },
-//   });
-// };
-
-// module.exports = startConsumer;

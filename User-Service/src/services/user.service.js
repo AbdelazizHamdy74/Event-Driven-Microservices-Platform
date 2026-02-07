@@ -30,3 +30,12 @@ exports.createUser = async (userData) => {
 
   return user;
 };
+
+exports.getUserById = async (id) => {
+  const [rows] = await db.execute(
+    "SELECT id, name, email FROM users WHERE id = ?",
+    [id],
+  );
+  if (!rows.length) return null;
+  return rows[0];
+};
