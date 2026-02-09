@@ -31,6 +31,20 @@ exports.getMyPosts = async (userId) => {
   return posts;
 };
 
+exports.getPostById = async (postId) => {
+  const [rows] = await db.execute(
+    "SELECT id, user_id, content, created_at FROM posts WHERE id = ?",
+    [postId],
+  );
+  if (!rows.length) return null;
+  return {
+    id: rows[0].id,
+    userId: rows[0].user_id,
+    content: rows[0].content,
+    createdAt: rows[0].created_at,
+  };
+};
+
 exports.updatePost = async (postId, user) => {
   const [rows] = await db.execute("SELECT * FROM posts WHERE id = ?", [postId]);
 

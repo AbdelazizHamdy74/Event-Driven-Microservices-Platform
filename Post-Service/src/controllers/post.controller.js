@@ -10,6 +10,12 @@ exports.getMyPosts = async (req, res) => {
   res.json(posts);
 };
 
+exports.getPostById = async (req, res) => {
+  const post = await postService.getPostById(Number(req.params.id));
+  if (!post) return res.status(404).json({ message: "Post not found" });
+  res.json(post);
+};
+
 exports.updatePost = async (req, res) => {
   await postService.updatePost(req.params.id, {
     id: req.user.id,

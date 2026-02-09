@@ -5,9 +5,12 @@ const auth = require("../middlewares/auth.middleware");
 
 router.use(auth);
 
-router.post("/", controller.createcomment);
+router.post("/posts/:postId", controller.createcomment);
+router.get("/posts/:postId", controller.getCommentsByPost);
+router.get("/posts/:postId/:commentId", controller.getCommentByPost);
+router.put("/posts/:postId/:commentId", controller.updatecomment);
+router.delete("/posts/:postId/:commentId", controller.deletecomment);
+
 router.get("/", controller.getMycomments);
-router.put("/:id", controller.updatecomment);
-router.delete("/:id", controller.deletecomment);
 
 module.exports = router;

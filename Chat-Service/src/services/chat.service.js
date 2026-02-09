@@ -2,23 +2,24 @@ const db = require("../config/db");
 const { producer } = require("../config/kafka");
 const axios = require("axios");
 
-const userNameCache = new Map();
+const userInfoCache = new Map();
 const userCacheTtlMs = Number(process.env.USER_CACHE_TTL_MS) || 300000;
 
-const getCachedUserName = (userId) => {
-  const entry = userNameCache.get(userId);
+const getCachedUserInfo = (userId) => {
+  const entry = userInfoCache.get(userId);
   if (!entry) return "";
   if (Date.now() > entry.expiresAt) {
-    userNameCache.delete(userId);
+    userInfoCache.delete(userId);
     return "";
   }
-  return entry.name || "";
+  return entry;
 };
 
-const setCachedUserName = (userId, name) => {
-  if (!name) return;
-  userNameCache.set(userId, {
-    name,
+const setCachedUserInfo = (userId, info) => {
+  userInfoCache.set(userId, {
+    id: info.id || userId,
+    exists: Boolean(info.exists),
+    name: info.name || "",
     expiresAt: Date.now() + userCacheTtlMs,
   });
 };
@@ -68,12 +69,12 @@ const getOrCreateConversation = async (
   return created[0];
 };
 
-const fetchUserName = async (userId, authToken) => {
-  const cached = getCachedUserName(userId);
+const fetchUserInfo = async (userId, authToken) => {
+  const cached = getCachedUserInfo(userId);
   if (cached) return cached;
 
   const baseUrl = process.env.USER_SERVICE_URL;
-  if (!baseUrl) return "";
+  if (!baseUrl) return null;
 
   try {
     const headers = {};
@@ -85,11 +86,27 @@ const fetchUserName = async (userId, authToken) => {
     });
     const name =
       typeof response.data?.name === "string" ? response.data.name : "";
-    setCachedUserName(userId, name);
-    return name;
+    const info = {
+      id: response.data?.id || userId,
+      exists: true,
+      name,
+    };
+    setCachedUserInfo(userId, info);
+    return info;
   } catch (err) {
-    return "";
+    if (err.response?.status === 404) {
+      const info = { id: userId, exists: false, name: "" };
+      setCachedUserInfo(userId, info);
+      return info;
+    }
+    return null;
   }
+};
+
+const fetchUserName = async (userId, authToken) => {
+  const info = await fetchUserInfo(userId, authToken);
+  if (!info || !info.exists) return "";
+  return info.name || "";
 };
 
 exports.sendMessage = async (
@@ -108,10 +125,17 @@ exports.sendMessage = async (
   if (userId === otherUserId) throw new Error("Cannot message yourself");
 
   if (!senderName) {
-    senderName = cleanName(await fetchUserName(userId, authToken));
+    const senderInfo = await fetchUserInfo(userId, authToken);
+    if (!senderInfo) throw new Error("User service unavailable");
+    if (!senderInfo.exists) throw new Error("Sender not found");
+    senderName = cleanName(senderInfo.name);
   }
+
+  const receiverInfo = await fetchUserInfo(otherUserId, authToken);
+  if (!receiverInfo) throw new Error("User service unavailable");
+  if (!receiverInfo.exists) throw new Error("Receiver not found");
   if (!receiverName) {
-    receiverName = cleanName(await fetchUserName(otherUserId, authToken));
+    receiverName = cleanName(receiverInfo.name);
   }
 
   const fallbackConversationName =

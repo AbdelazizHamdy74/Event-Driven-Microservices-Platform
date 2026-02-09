@@ -1,7 +1,7 @@
 const { Kafka } = require("kafkajs");
 
 const kafka = new Kafka({
-  clientId: "comment-service",
+  clientId: "like-service",
   brokers: [process.env.KAFKA_BROKER],
 });
 
@@ -11,4 +11,4 @@ const connectProducer = async () => {
   await producer.connect();
 };
 
-module.exports = { kafka, producer, connectProducer };
+module.exports = { producer, connectProducer };

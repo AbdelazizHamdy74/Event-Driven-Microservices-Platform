@@ -1,22 +1,22 @@
-# MicroSocial 🧩  
+# MicroSocial
 Event-Driven Microservices Social Platform
 
-MicroSocial is a backend social platform built using **Node.js**, **Express**, **Kafka**, and **Microservices Architecture**.  
+MicroSocial is a backend social platform built using Node.js, Express, Kafka, and a microservices architecture.
 The system is designed to be scalable, loosely coupled, and event-driven.
 
 ---
 
-## 🏗️ Architecture Overview
+## Architecture Overview
 
-The platform follows **Microservices Architecture** with **Apache Kafka** as the event broker.
+The platform follows microservices architecture with Apache Kafka as the event broker.
 
-### Services:
-- **User Service**
-- **Post Service**
-- **Notification Service**
-- (Planned) Chat Service
-- (Planned) Comment Service
-- (Planned) Like Service
+Services:
+- User Service
+- Post Service
+- Notification Service
+- Chat Service
+- Comment Service
+- Like Service
 
 Each service:
 - Has its own database
@@ -25,60 +25,124 @@ Each service:
 
 ---
 
-## 🔄 Event-Driven Flow (Kafka)
+## Event-Driven Flow (Kafka)
 
 Services publish events such as:
-- `USER_CREATED`
-- `POST_CREATED`
-- `POST_UPDATED`
-- `POST_DELETED`
+- USER_CREATED
+- POST_CREATED
+- POST_UPDATED
+- POST_DELETED
+- CHAT_MESSAGE_CREATED
+- COMMENT_CREATED
+- COMMENT_UPDATED
+- COMMENT_DELETED
+- POST_LIKED
+- POST_UNLIKED
+- FRIEND_REQUEST_SENT
+- FRIEND_REQUEST_ACCEPTED
+- FRIEND_REQUEST_REJECTED
+- FRIEND_BLOCKED
+- FRIEND_UNBLOCKED
 
-The **Notification Service** consumes these events and stores notifications accordingly.
+The Notification Service consumes these events and stores notifications accordingly.
 
 ---
 
-## 📦 Services Breakdown
+## Services Breakdown
 
-### 👤 User Service
+### User Service
 Responsible for:
-- User signup & login
+- User signup and login
 - Authentication using JWT
 - Role-based access control (Admin / User)
 
 Endpoints:
-- `POST /signup`
-- `POST /login`
-- `GET /users` (Admin only)
+- POST /signup
+- POST /login
+- GET /users (Admin only)
 
 ---
 
-### 📝 Post Service
+### Post Service
 Responsible for:
 - Creating, updating, deleting posts
 - Fetching user posts
 - Publishing post-related events to Kafka
 
 Endpoints:
-- `POST /posts`
-- `GET /posts`
-- `PUT /posts/:id`
-- `DELETE /posts/:id`
+- POST /posts
+- GET /posts
+- PUT /posts/:id
+- DELETE /posts/:id
 
 ---
 
-### 🔔 Notification Service
+### Comment Service
+Responsible for:
+- Create, update, delete comments
+- Fetch user comments
+- Fetch comments for a specific post
+- Enforce comments belong to an existing post
+- Auto-delete comments when a post is deleted
+- Publishing comment-related events to Kafka
+
+Endpoints:
+- POST /comments/posts/:postId
+- GET /comments/posts/:postId
+- GET /comments/posts/:postId/:commentId
+- PUT /comments/posts/:postId/:commentId
+- DELETE /comments/posts/:postId/:commentId
+- GET /comments
+
+---
+
+### Chat Service
+Responsible for:
+- Real-time messaging
+- Conversations and message history
+- Publishing chat-related events to Kafka
+
+Endpoints:
+- GET /chats
+- GET /chats/:otherUserId/messages
+- POST /chats/:otherUserId/messages
+
+---
+
+### Notification Service
 Responsible for:
 - Consuming Kafka events
 - Creating notifications for users
 - Storing notifications in database
 
 Consumed Topics:
-- `user-events`
-- `post-events`
+- user-events
+- post-events
+- chat-events
+- comment-events
+- like-events
+- friendship-events
 
 ---
 
-## 🔐 Security
+### Like Service
+Responsible for:
+- Like / Unlike
+- Prevent double-like
+- Count likes
+- Publishing like-related events
+
+Endpoints:
+- POST /likes/posts/:postId
+- DELETE /likes/posts/:postId
+- GET /likes/posts/:postId/count
+
+Notes:
+- POST /likes/posts/:postId expects postOwnerId in the body.
+
+---
+
+## Security
 - JWT Authentication
 - Role-based authorization
 - Middleware-based access control
@@ -86,8 +150,7 @@ Consumed Topics:
 
 ---
 
-## 🧠 Tech Stack
-
+## Tech Stack
 - Node.js
 - Express.js
 - Apache Kafka
@@ -98,28 +161,24 @@ Consumed Topics:
 
 ---
 
-## 🚀 Future Features
-
-- 💬 Chat Service (Real-time messaging)
-- 💬 Comment Service
-- ❤️ Like Service
-- 📡 WebSocket support
-- 🔍 API Gateway
-- 📊 Monitoring & Logging
-- 🛡️ Rate Limiting & Security Enhancements
+## Future Features
+- WebSocket support
+- API Gateway
+- Monitoring and Logging
+- Rate Limiting and Security Enhancements
 
 ---
 
-## 🧪 Running the Project (Basic)
+## Running the Project (Basic)
 
-1. Start Kafka & Zookeeper
+1. Start Kafka and Zookeeper
 2. Run each service independently
 3. Ensure topics are created
 4. Test APIs using Postman
 
 ---
 
-## 👨‍💻 Author
-**Abdelaziz**  
-Backend / Full Stack Developer  
-Microservices & Event-Driven Systems
+## Author
+Abdelaziz
+Backend / Full Stack Developer
+Microservices and Event-Driven Systems
