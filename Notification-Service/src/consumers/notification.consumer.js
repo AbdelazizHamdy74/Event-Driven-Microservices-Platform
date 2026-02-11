@@ -106,6 +106,17 @@ const startConsumer = async () => {
           };
           break;
 
+        case "POST_UNLIKED":
+          if (event.data.postOwnerId === event.data.fromUserId) break;
+          notification = {
+            userId: event.data.postOwnerId,
+            type: "POST_UNLIKED",
+            message: event.data.fromUserName
+              ? `${event.data.fromUserName} unliked your post`
+              : `User ${event.data.fromUserId} unliked your post`,
+          };
+          break;
+
         case "FRIEND_REQUEST_SENT":
           notification = {
             userId: event.data.toUserId,
@@ -140,7 +151,9 @@ const startConsumer = async () => {
           notification = {
             userId: event.data.toUserId,
             type: "FRIEND_BLOCKED",
-            message: `User ${event.data.fromUserId} blocked you`,
+            message: event.data.fromUserName
+              ? `${event.data.fromUserName} blocked you`
+              : `User ${event.data.fromUserId} blocked you`,
           };
           break;
 
@@ -148,12 +161,26 @@ const startConsumer = async () => {
           notification = {
             userId: event.data.toUserId,
             type: "FRIEND_UNBLOCKED",
-            message: `User ${event.data.fromUserId} unblocked you`,
+            message: event.data.fromUserName
+              ? `${event.data.fromUserName} unblocked you`
+              : `User ${event.data.fromUserId} unblocked you`,
           };
           break;
       }
 
       if (notification) {
+        if (
+          notification.userId === undefined ||
+          notification.type === undefined ||
+          notification.message === undefined
+        ) {
+          console.warn(
+            "Skipping malformed notification event:",
+            JSON.stringify(event),
+          );
+          return;
+        }
+
         await db.execute(
           "INSERT INTO notifications (user_id, type, message) VALUES (?, ?, ?)",
           [notification.userId, notification.type, notification.message],

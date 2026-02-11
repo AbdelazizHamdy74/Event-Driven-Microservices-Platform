@@ -66,7 +66,7 @@ exports.updatePost = async (postId, user) => {
       {
         value: JSON.stringify({
           event: "POST_UPDATED",
-          data: { postId },
+          data: { postId, userId: post.user_id },
         }),
       },
     ],
@@ -91,7 +91,7 @@ exports.deletePost = async (postId, user) => {
       {
         value: JSON.stringify({
           event: "POST_DELETED",
-          data: { postId },
+          data: { postId, userId: post.user_id },
         }),
       },
     ],

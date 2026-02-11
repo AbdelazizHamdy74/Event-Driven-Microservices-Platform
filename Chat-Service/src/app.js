@@ -7,12 +7,33 @@ const jwt = require("jsonwebtoken");
 const chatRoutes = require("./routes/chat.routes");
 const { connectProducer } = require("./config/kafka");
 const chatService = require("./services/chat.service");
+const { createObservability } = require("../../shared/http/observability");
+const { createRateLimiter } = require("../../shared/http/rateLimit");
+const { securityHeaders } = require("../../shared/http/security");
+const { notFoundHandler, errorHandler } = require("../../shared/http/errors");
 
 const app = express();
-app.use(express.json());
+const { requestLogger, healthHandler, metricsHandler } =
+  createObservability("chat-service");
+
+app.disable("x-powered-by");
+app.use(express.json({ limit: "100kb" }));
 app.use(cors());
+app.use(securityHeaders);
+app.use(
+  createRateLimiter({
+    windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60000,
+    max: Number(process.env.RATE_LIMIT_MAX) || 120,
+  }),
+);
+app.use(requestLogger);
+
+app.get("/health", healthHandler);
+app.get("/metrics", metricsHandler);
 
 app.use("/chats", chatRoutes);
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 const server = http.createServer(app);
 
@@ -47,7 +68,9 @@ io.on("connection", (socket) => {
       const content =
         typeof payload?.content === "string" ? payload.content.trim() : "";
       const senderName =
-        typeof payload?.senderName === "string" ? payload.senderName.trim() : "";
+        typeof payload?.senderName === "string"
+          ? payload.senderName.trim()
+          : "";
       const receiverName =
         typeof payload?.receiverName === "string"
           ? payload.receiverName.trim()

@@ -49,6 +49,7 @@ exports.unblockUser = async (req, res) => {
   const result = await friendshipService.unblockUser(
     req.user.id,
     Number(req.params.userId),
+    req.headers.authorization || "",
   );
   res.json(result);
 };

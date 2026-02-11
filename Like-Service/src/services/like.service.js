@@ -58,6 +58,34 @@ const fetchUserInfo = async (userId, authToken) => {
   }
 };
 
+const fetchPost = async (postId, authToken) => {
+  const baseUrl = process.env.POST_SERVICE_URL || "http://localhost:3002";
+  if (!baseUrl) return null;
+
+  try {
+    const headers = {};
+    if (authToken) headers.Authorization = authToken;
+
+    const response = await axios.get(`${baseUrl}/posts/${postId}`, {
+      timeout: 3000,
+      headers,
+    });
+
+    if (!response.data?.id) return null;
+
+    return {
+      id: response.data.id,
+      userId: Number(response.data.userId),
+      exists: true,
+    };
+  } catch (err) {
+    if (err.response?.status === 404) {
+      return { exists: false };
+    }
+    return null;
+  }
+};
+
 const validatePostOwner = async (postOwnerId, authToken) => {
   if (!postOwnerId) throw new Error("Post owner is required");
   const ownerInfo = await fetchUserInfo(postOwnerId, authToken);
@@ -66,31 +94,89 @@ const validatePostOwner = async (postOwnerId, authToken) => {
   return ownerInfo;
 };
 
-exports.likePost = async (
-  userId,
-  postId,
-  postOwnerId,
-  options = {},
-  authToken = "",
-) => {
+// exports.likePost = async (
+//   userId,
+//   postId,
+//   postOwnerId,
+//   options = {},
+//   authToken = "",
+// ) => {
+//   if (!postId) throw new Error("Post is required");
+
+//   const ownerInfo = await validatePostOwner(postOwnerId, authToken);
+
+//   let userName =
+//     typeof options.userName === "string" ? options.userName.trim() : "";
+//   if (!userName) {
+//     const actorInfo = await fetchUserInfo(userId, authToken);
+//     if (!actorInfo) throw new Error("User service unavailable");
+//     if (!actorInfo.exists) throw new Error("User not found");
+//     userName = actorInfo.name || "";
+//   }
+
+//   let result;
+//   try {
+//     [result] = await db.execute(
+//       "INSERT INTO likes (post_id, user_id, post_owner_id) VALUES (?, ?, ?)",
+//       [postId, userId, ownerInfo.id],
+//     );
+//   } catch (err) {
+//     if (err.code === "ER_DUP_ENTRY") {
+//       throw new Error("Already liked");
+//     }
+//     throw err;
+//   }
+
+//   const like = {
+//     id: result.insertId,
+//     postId,
+//     postOwnerId: ownerInfo.id,
+//     userId,
+//   };
+
+//   await producer.send({
+//     topic: "like-events",
+//     messages: [
+//       {
+//         value: JSON.stringify({
+//           event: "POST_LIKED",
+//           data: {
+//             postId,
+//             postOwnerId: ownerInfo.id,
+//             fromUserId: userId,
+//             fromUserName: userName || null,
+//           },
+//         }),
+//       },
+//     ],
+//   });
+
+//   return like;
+// };
+
+exports.likePost = async (userId, postId, authToken = "") => {
   if (!postId) throw new Error("Post is required");
 
-  const ownerInfo = await validatePostOwner(postOwnerId, authToken);
+  const post = await fetchPost(postId, authToken);
 
-  let userName =
-    typeof options.userName === "string" ? options.userName.trim() : "";
-  if (!userName) {
-    const actorInfo = await fetchUserInfo(userId, authToken);
-    if (!actorInfo) throw new Error("User service unavailable");
-    if (!actorInfo.exists) throw new Error("User not found");
-    userName = actorInfo.name || "";
-  }
+  if (!post) throw new Error("Post service unavailable");
+  if (!post.exists) throw new Error("Post not found");
+
+  const postOwnerId = post.userId;
+
+  const actorInfo = await fetchUserInfo(userId, authToken);
+
+  if (!actorInfo) throw new Error("User service unavailable");
+  if (!actorInfo.exists) throw new Error("User not found");
+
+  const userName = actorInfo.name || null;
 
   let result;
+
   try {
     [result] = await db.execute(
       "INSERT INTO likes (post_id, user_id, post_owner_id) VALUES (?, ?, ?)",
-      [postId, userId, ownerInfo.id],
+      [postId, userId, postOwnerId],
     );
   } catch (err) {
     if (err.code === "ER_DUP_ENTRY") {
@@ -102,7 +188,7 @@ exports.likePost = async (
   const like = {
     id: result.insertId,
     postId,
-    postOwnerId: ownerInfo.id,
+    postOwnerId,
     userId,
   };
 
@@ -114,9 +200,9 @@ exports.likePost = async (
           event: "POST_LIKED",
           data: {
             postId,
-            postOwnerId: ownerInfo.id,
+            postOwnerId,
             fromUserId: userId,
-            fromUserName: userName || null,
+            fromUserName: userName,
           },
         }),
       },
@@ -126,8 +212,20 @@ exports.likePost = async (
   return like;
 };
 
-exports.unlikePost = async (userId, postId) => {
+exports.unlikePost = async (userId, postId, authToken = "") => {
   if (!postId) throw new Error("Post is required");
+
+  const [likes] = await db.execute(
+    "SELECT post_owner_id FROM likes WHERE post_id = ? AND user_id = ? LIMIT 1",
+    [postId, userId],
+  );
+
+  if (!likes.length) throw new Error("Like not found");
+
+  const postOwnerId = Number(likes[0].post_owner_id);
+  const actorInfo = await fetchUserInfo(userId, authToken);
+  const fromUserName =
+    actorInfo && actorInfo.exists ? actorInfo.name || null : null;
 
   const [result] = await db.execute(
     "DELETE FROM likes WHERE post_id = ? AND user_id = ?",
@@ -144,7 +242,9 @@ exports.unlikePost = async (userId, postId) => {
           event: "POST_UNLIKED",
           data: {
             postId,
+            postOwnerId,
             fromUserId: userId,
+            fromUserName,
           },
         }),
       },

@@ -247,6 +247,10 @@ exports.blockUser = async (userId, otherUserId, authToken = "") => {
   if (userId === otherUserId) throw new Error("Cannot block yourself");
 
   const targetInfo = await ensureTargetUser(otherUserId, authToken);
+  const actorInfo = await fetchUserInfo(userId, authToken);
+  if (!actorInfo) throw new Error("User service unavailable");
+  if (!actorInfo.exists) throw new Error("User not found");
+  const fromUserName = actorInfo.name || "";
 
   const existing = await getRelationship(userId, otherUserId);
   if (existing) {
@@ -274,6 +278,7 @@ exports.blockUser = async (userId, otherUserId, authToken = "") => {
           data: {
             fromUserId: userId,
             toUserId: targetInfo.id,
+            fromUserName: fromUserName || null,
           },
         }),
       },
@@ -283,7 +288,7 @@ exports.blockUser = async (userId, otherUserId, authToken = "") => {
   return { message: "Blocked" };
 };
 
-exports.unblockUser = async (userId, otherUserId) => {
+exports.unblockUser = async (userId, otherUserId, authToken = "") => {
   if (!otherUserId) throw new Error("Target user is required");
   if (userId === otherUserId) throw new Error("Invalid request");
 
@@ -294,6 +299,11 @@ exports.unblockUser = async (userId, otherUserId) => {
   if (existing.blocked_by !== userId) {
     throw new Error("Block not found");
   }
+
+  const actorInfo = await fetchUserInfo(userId, authToken);
+  if (!actorInfo) throw new Error("User service unavailable");
+  if (!actorInfo.exists) throw new Error("User not found");
+  const fromUserName = actorInfo.name || "";
 
   await db.execute("DELETE FROM friendships WHERE id = ?", [existing.id]);
 
@@ -306,6 +316,7 @@ exports.unblockUser = async (userId, otherUserId) => {
           data: {
             fromUserId: userId,
             toUserId: otherUserId,
+            fromUserName: fromUserName || null,
           },
         }),
       },
