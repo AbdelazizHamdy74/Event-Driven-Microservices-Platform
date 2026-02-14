@@ -1,0 +1,23 @@
+{
+  "terminal.integrated.defaultProfile.windows": "Command Prompt",
+  "terminal.integrated.profiles.windows": {
+    "Command Prompt": {
+      "source": "Command Prompt",
+      "icon": "terminal-cmd"
+    },
+    "PowerShell": {
+      "source": "PowerShell",
+      "icon": "terminal-powershell"
+    }
+  },
+  "terminal.integrated.cwd": "${workspaceFolder}",
+  "terminal.integrated.shellIntegration.enabled": true,
+  "terminal.integrated.env.windows": {
+    "TERM": "xterm-256color"
+  },
+  "terminal.integrated.fontSize": 14,
+  "terminal.integrated.fontFamily": "Consolas, 'Courier New', monospace",
+  "terminal.integrated.scrollback": 10000,
+  "terminal.integrated.cursor.blink": true,
+  "terminal.integrated.autoReconnect": "always"
+}

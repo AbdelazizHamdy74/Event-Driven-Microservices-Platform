@@ -29,3 +29,9 @@ exports.resetPasswordWithOtp = async (req, res) => {
   const result = await authService.resetPasswordWithOtp(req.body);
   res.json(result);
 };
+
+exports.getSession = async (req, res) => {
+  res.json({
+    user: req.user,
+  });
+};

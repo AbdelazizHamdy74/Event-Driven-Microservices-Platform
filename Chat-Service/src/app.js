@@ -7,6 +7,7 @@ const jwt = require("jsonwebtoken");
 const chatRoutes = require("./routes/chat.routes");
 const { connectProducer } = require("./config/kafka");
 const chatService = require("./services/chat.service");
+const { validateUserSession } = require("../../shared/auth/validateUserSession");
 const { createObservability } = require("../../shared/http/observability");
 const { createRateLimiter } = require("../../shared/http/rateLimit");
 const { securityHeaders } = require("../../shared/http/security");
@@ -44,16 +45,33 @@ const io = new Server(server, {
   },
 });
 
-io.use((socket, next) => {
-  const headerToken = socket.handshake.headers?.authorization?.split(" ")[1];
-  const token = socket.handshake.auth?.token || headerToken;
+io.use(async (socket, next) => {
+  const headerAuthorization = socket.handshake.headers?.authorization;
+  const headerToken = headerAuthorization?.split(" ")[1];
+  const authToken =
+    typeof socket.handshake.auth?.token === "string"
+      ? socket.handshake.auth.token.replace(/^Bearer\s+/i, "")
+      : socket.handshake.auth?.token;
+  const token = authToken || headerToken;
+
   if (!token) return next(new Error("Unauthorized"));
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    socket.user = decoded;
+    jwt.verify(token, process.env.JWT_SECRET);
+
+    const session = await validateUserSession({
+      authorization: headerAuthorization || authToken,
+      userServiceUrl: process.env.USER_SERVICE_URL || "http://localhost:3001",
+      timeoutMs: Number(process.env.AUTH_CHECK_TIMEOUT_MS) || 3000,
+    });
+
+    if (!session.ok) {
+      return next(new Error(session.message || "Unauthorized"));
+    }
+
+    socket.user = session.user;
     return next();
-  } catch (err) {
+  } catch (_err) {
     return next(new Error("Unauthorized"));
   }
 });

@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { producer } = require("../config/kafka");
 const { sendEmail } = require("../utils/sendEmail");
+const { buildPasswordVersion } = require("../utils/passwordVersion");
 
 const OTP_TTL_MINUTES = Number(process.env.OTP_TTL_MINUTES) || 10;
 const OTP_SUCCESS_MESSAGE = "If this email exists, OTP has been sent";
@@ -71,7 +72,11 @@ exports.login = async ({ email, password }) => {
   if (!isMatch) throw new Error("Invalid credentials");
 
   const token = jwt.sign(
-    { id: user.id, role: user.role },
+    {
+      id: user.id,
+      role: user.role,
+      pwdv: buildPasswordVersion(user.password),
+    },
     process.env.JWT_SECRET,
     { expiresIn: "1d" },
   );
@@ -118,10 +123,10 @@ exports.resetPassword = async (userId, { oldPassword, newPassword }) => {
 
   const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-  await db.execute(
-    await db.execute("UPDATE users SET password = ? WHERE id = ?"),
-    [hashedPassword, userId],
-  );
+  await db.execute("UPDATE users SET password = ? WHERE id = ?", [
+    hashedPassword,
+    userId,
+  ]);
 
   return { message: "Password reset successful" };
 };

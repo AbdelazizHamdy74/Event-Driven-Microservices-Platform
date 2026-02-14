@@ -11,6 +11,7 @@ The system is designed to be scalable, loosely coupled, and event-driven.
 
 Services:
 
+- API Gateway (`3000`)
 - User Service (`3001`)
 - Post Service (`3002`)
 - Comment Service (`3003`)
@@ -61,6 +62,48 @@ and stores notifications in `notification_service.notifications`.
 ---
 
 ## Service Endpoints
+
+### API Gateway (`http://localhost:3000`)
+
+Client-facing entry point for all HTTP APIs:
+
+- `POST /auth/signup`
+- `POST /auth/login`
+- `GET /auth/users` (admin)
+- `POST /users` (admin)
+- `GET /users/:id`
+- `PUT /users/:id`
+- `DELETE /users/:id`
+- `POST /posts`
+- `GET /posts`
+- `GET /posts/:id`
+- `PUT /posts/:id`
+- `DELETE /posts/:id`
+- `POST /comments/posts/:postId`
+- `GET /comments/posts/:postId`
+- `GET /comments/posts/:postId/:commentId`
+- `PUT /comments/posts/:postId/:commentId`
+- `DELETE /comments/posts/:postId/:commentId`
+- `GET /comments`
+- `POST /friendships/requests/:userId`
+- `POST /friendships/requests/:userId/accept`
+- `POST /friendships/requests/:userId/reject`
+- `POST /friendships/blocks/:userId`
+- `DELETE /friendships/blocks/:userId`
+- `GET /friendships/status/:userId`
+- `GET /chats`
+- `GET /chats/:otherUserId/messages`
+- `POST /chats/:otherUserId/messages`
+- `POST /likes/posts/:postId`
+- `DELETE /likes/posts/:postId`
+- `GET /likes/posts/:postId/count`
+- `GET /health`
+- `GET /metrics`
+- `GET /health/services`
+
+Internal services remain available on their own ports for service-to-service calls.
+
+---
 
 ### User Service (`http://localhost:3001`)
 
@@ -121,6 +164,7 @@ Notes:
 
 Applied to all HTTP services:
 
+- API Gateway
 - User Service
 - Post Service
 - Comment Service
@@ -197,7 +241,6 @@ Example 404 response:
 
 ## Future Features
 
-- API Gateway
 - Centralized metrics/log pipeline (Prometheus/Grafana/ELK)
 - Advanced security hardening (WAF, stricter CORS policy, secret rotation)
 
@@ -209,6 +252,7 @@ Example 404 response:
 2. Ensure MySQL is running.
 3. Create service databases and apply each `schema.sql`.
 4. Run HTTP services:
+   - `API-Gateway`
    - `User-Service`
    - `Post-Service`
    - `Comment-Service`
@@ -217,6 +261,8 @@ Example 404 response:
    - `Like-Service`
 5. Run `Notification-Service` consumer.
 6. Verify health checks:
+   - `GET http://localhost:3000/health`
+   - `GET http://localhost:3000/health/services`
    - `GET http://localhost:3001/health`
    - `GET http://localhost:3002/health`
    - `GET http://localhost:3003/health`

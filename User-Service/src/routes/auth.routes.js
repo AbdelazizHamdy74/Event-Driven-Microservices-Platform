@@ -9,6 +9,7 @@ router.post("/login", controller.login);
 router.post("/forgot-password", controller.forgotPassword);
 router.post("/reset-password/otp", controller.resetPasswordWithOtp);
 router.post("/reset-password", auth, controller.resetPassword);
+router.get("/session", auth, controller.getSession);
 router.get("/users", auth, admin, controller.getAllUsers);
 
 module.exports = router;
