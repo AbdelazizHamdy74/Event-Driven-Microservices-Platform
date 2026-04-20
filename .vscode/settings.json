@@ -1,23 +1,14 @@
 {
-  "terminal.integrated.defaultProfile.windows": "Command Prompt",
+  "terminal.integrated.defaultProfile.windows": "PowerShell",
   "terminal.integrated.profiles.windows": {
-    "Command Prompt": {
-      "source": "Command Prompt",
-      "icon": "terminal-cmd"
-    },
     "PowerShell": {
-      "source": "PowerShell",
-      "icon": "terminal-powershell"
+      "path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "args": [
+        "-NoLogo",
+        "-NoProfile"
+      ]
     }
   },
-  "terminal.integrated.cwd": "${workspaceFolder}",
-  "terminal.integrated.shellIntegration.enabled": true,
-  "terminal.integrated.env.windows": {
-    "TERM": "xterm-256color"
-  },
-  "terminal.integrated.fontSize": 14,
-  "terminal.integrated.fontFamily": "Consolas, 'Courier New', monospace",
-  "terminal.integrated.scrollback": 10000,
-  "terminal.integrated.cursor.blink": true,
-  "terminal.integrated.autoReconnect": "always"
+  "terminal.integrated.shellIntegration.enabled": false,
+  "terminal.integrated.enablePersistentSessions": false
 }

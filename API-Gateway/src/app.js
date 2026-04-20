@@ -63,6 +63,8 @@ const removeHopByHopHeaders = (headers = {}) => {
   return sanitized;
 };
 
+const MAX_PROXY_BODY_BYTES = Number(process.env.GATEWAY_MAX_BODY_BYTES) || 15 * 1024 * 1024;
+
 const createProxyMiddleware = ({ target, serviceName }) => {
   return (req, res, next) => {
     let upstreamUrl;
@@ -74,59 +76,88 @@ const createProxyMiddleware = ({ target, serviceName }) => {
       return next(error);
     }
 
-    const transport = upstreamUrl.protocol === "https:" ? https : http;
-    const headers = removeHopByHopHeaders(req.headers);
-    const clientIp = req.ip || req.socket?.remoteAddress || "unknown";
-    headers.host = upstreamUrl.host;
-    headers["x-forwarded-for"] = headers["x-forwarded-for"]
-      ? `${headers["x-forwarded-for"]}, ${clientIp}`
-      : clientIp;
-    headers["x-forwarded-host"] = req.headers.host || "";
-    headers["x-forwarded-proto"] = req.protocol;
-    headers["x-request-id"] = req.requestId || headers["x-request-id"] || "";
+    const chunks = [];
+    let receivedBytes = 0;
+    let rejectedBody = false;
 
-    const upstreamRequest = transport.request(
-      {
-        protocol: upstreamUrl.protocol,
-        hostname: upstreamUrl.hostname,
-        port:
-          Number(upstreamUrl.port) ||
-          (upstreamUrl.protocol === "https:" ? 443 : 80),
-        method: req.method,
-        path: `${upstreamUrl.pathname}${upstreamUrl.search}`,
-        headers,
-        timeout: proxyTimeoutMs,
-      },
-      (upstreamResponse) => {
-        const responseHeaders = removeHopByHopHeaders(upstreamResponse.headers);
-        Object.entries(responseHeaders).forEach(([name, value]) => {
-          if (typeof value !== "undefined") {
-            res.setHeader(name, value);
-          }
-        });
-
-        res.status(upstreamResponse.statusCode || 502);
-        upstreamResponse.pipe(res);
-      },
-    );
-
-    upstreamRequest.on("timeout", () => {
-      upstreamRequest.destroy(new Error("Upstream request timeout"));
+    req.on("data", (chunk) => {
+      receivedBytes += chunk.length;
+      if (receivedBytes > MAX_PROXY_BODY_BYTES) {
+        rejectedBody = true;
+        if (!res.headersSent) {
+          res.status(413).json({ message: "Request body too large" });
+        }
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
     });
 
-    upstreamRequest.on("error", (cause) => {
-      if (res.headersSent) return;
-      const error = new Error(`Gateway failed to reach ${serviceName}`);
-      error.status = 502;
-      error.cause = cause;
-      next(error);
+    req.on("end", () => {
+      if (rejectedBody) return;
+
+      const body = chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
+
+      const transport = upstreamUrl.protocol === "https:" ? https : http;
+      const headers = removeHopByHopHeaders({ ...req.headers });
+      headers["content-length"] = String(body.length);
+      delete headers["transfer-encoding"];
+      const clientIp = req.ip || req.socket?.remoteAddress || "unknown";
+      headers.host = upstreamUrl.host;
+      headers["x-forwarded-for"] = headers["x-forwarded-for"]
+        ? `${headers["x-forwarded-for"]}, ${clientIp}`
+        : clientIp;
+      headers["x-forwarded-host"] = req.headers.host || "";
+      headers["x-forwarded-proto"] = req.protocol;
+      headers["x-request-id"] = req.requestId || headers["x-request-id"] || "";
+
+      const upstreamRequest = transport.request(
+        {
+          protocol: upstreamUrl.protocol,
+          hostname: upstreamUrl.hostname,
+          port:
+            Number(upstreamUrl.port) ||
+            (upstreamUrl.protocol === "https:" ? 443 : 80),
+          method: req.method,
+          path: `${upstreamUrl.pathname}${upstreamUrl.search}`,
+          headers,
+          timeout: proxyTimeoutMs,
+        },
+        (upstreamResponse) => {
+          const responseHeaders = removeHopByHopHeaders(upstreamResponse.headers);
+          Object.entries(responseHeaders).forEach(([name, value]) => {
+            if (typeof value !== "undefined") {
+              res.setHeader(name, value);
+            }
+          });
+
+          res.status(upstreamResponse.statusCode || 502);
+          upstreamResponse.pipe(res);
+        },
+      );
+
+      upstreamRequest.on("timeout", () => {
+        upstreamRequest.destroy(new Error("Upstream request timeout"));
+      });
+
+      upstreamRequest.on("error", (cause) => {
+        if (res.headersSent) return;
+        const error = new Error(`Gateway failed to reach ${serviceName}`);
+        error.status = 502;
+        error.cause = cause;
+        next(error);
+      });
+
+      req.on("aborted", () => {
+        upstreamRequest.destroy();
+      });
+
+      upstreamRequest.end(body);
     });
 
-    req.on("aborted", () => {
-      upstreamRequest.destroy();
+    req.on("error", (err) => {
+      next(err);
     });
-
-    req.pipe(upstreamRequest);
   };
 };
 

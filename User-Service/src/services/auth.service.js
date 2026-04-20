@@ -29,32 +29,58 @@ const sendForgotPasswordEmail = async ({ email, name, otp }) => {
 };
 
 exports.signup = async ({ name, email, password }) => {
+  if (
+    typeof name !== "string" ||
+    !name.trim() ||
+    typeof email !== "string" ||
+    !email.trim() ||
+    typeof password !== "string" ||
+    !password
+  ) {
+    throw createError("name, email, and password are required", 400);
+  }
+
   const hashedPassword = await bcrypt.hash(password, 10);
   const normalizedEmail = email.trim().toLowerCase();
 
-  const [result] = await db.execute(
-    "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
-    [name, normalizedEmail, hashedPassword],
-  );
+  let result;
+  try {
+    [result] = await db.execute(
+      "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
+      [name.trim(), normalizedEmail, hashedPassword],
+    );
+  } catch (err) {
+    if (err && err.code === "ER_DUP_ENTRY") {
+      throw createError("An account with this email already exists", 409);
+    }
+    throw err;
+  }
 
   const user = {
     id: result.insertId,
-    name,
+    name: name.trim(),
     email: normalizedEmail,
     role: "user",
   };
 
-  await producer.send({
-    topic: "user-events",
-    messages: [
-      {
-        value: JSON.stringify({
-          event: "USER_CREATED",
-          data: user,
-        }),
-      },
-    ],
-  });
+  try {
+    await producer.send({
+      topic: "user-events",
+      messages: [
+        {
+          value: JSON.stringify({
+            event: "USER_CREATED",
+            data: user,
+          }),
+        },
+      ],
+    });
+  } catch (err) {
+    console.error(
+      "[user-service] Kafka publish failed (USER_CREATED); user row was created.",
+      err?.stack || err?.message || err,
+    );
+  }
 
   return user;
 };
