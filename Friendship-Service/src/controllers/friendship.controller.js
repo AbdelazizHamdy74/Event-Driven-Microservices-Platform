@@ -61,3 +61,11 @@ exports.getStatus = async (req, res) => {
   );
   res.json(status);
 };
+
+exports.getFriends = async (req, res) => {
+  const friends = await friendshipService.getFriends(
+    req.user.id,
+    req.headers.authorization || "",
+  );
+  res.json(friends);
+};

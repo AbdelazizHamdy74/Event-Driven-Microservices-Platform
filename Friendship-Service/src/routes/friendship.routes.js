@@ -12,6 +12,7 @@ router.post("/requests/:userId/reject", controller.rejectRequest);
 router.post("/blocks/:userId", controller.blockUser);
 router.delete("/blocks/:userId", controller.unblockUser);
 
+router.get("/friends", controller.getFriends);
 router.get("/status/:userId", controller.getStatus);
 
 module.exports = router;

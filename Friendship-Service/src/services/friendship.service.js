@@ -351,3 +351,35 @@ exports.getStatus = async (userId, otherUserId) => {
 
   return { status: "NONE" };
 };
+
+exports.getFriends = async (userId, authToken = "") => {
+  const [rows] = await db.execute(
+    [
+      "SELECT",
+      "CASE WHEN user1_id = ? THEN user2_id ELSE user1_id END AS friend_id",
+      "FROM friendships",
+      "WHERE status = 'FRIENDS' AND (user1_id = ? OR user2_id = ?)",
+      "ORDER BY updated_at DESC",
+    ].join(" "),
+    [userId, userId, userId],
+  );
+
+  const friendIds = rows
+    .map((r) => Number(r.friend_id))
+    .filter((id) => Number.isFinite(id));
+
+  const uniqueIds = Array.from(new Set(friendIds));
+  if (!uniqueIds.length) return [];
+
+  const results = await Promise.all(
+    uniqueIds.map(async (id) => {
+      const info = await fetchUserInfo(id, authToken);
+      return {
+        id,
+        name: info && info.exists ? info.name || null : null,
+      };
+    }),
+  );
+
+  return results;
+};

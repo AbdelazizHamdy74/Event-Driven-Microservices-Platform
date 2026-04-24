@@ -6,6 +6,8 @@ const auth = require("../middlewares/auth.middleware");
 router.use(auth);
 
 router.post("/", controller.createPost);
+router.get("/feed", controller.getFeed);
+router.get("/user/:userId", controller.getPostsByUserId);
 router.get("/:id", controller.getPostById);
 router.get("/", controller.getMyPosts);
 router.put("/:id", controller.updatePost);

@@ -9,25 +9,58 @@ exports.createPost = async (userId, content) => {
 
   const post = { id: result.insertId, userId, content };
 
-  await producer.send({
-    topic: "post-events",
-    messages: [
-      {
-        value: JSON.stringify({
-          event: "POST_CREATED",
-          data: post,
-        }),
-      },
-    ],
-  });
+  try {
+    await producer.send({
+      topic: "post-events",
+      messages: [
+        {
+          value: JSON.stringify({
+            event: "POST_CREATED",
+            data: post,
+          }),
+        },
+      ],
+    });
+  } catch (err) {
+    console.error(
+      "[post-service] Kafka publish failed (POST_CREATED); post row was created.",
+      err?.stack || err?.message || err,
+    );
+  }
 
   return post;
 };
 
 exports.getMyPosts = async (userId) => {
-  const [posts] = await db.execute("SELECT * FROM posts WHERE user_id = ?", [
-    userId,
-  ]);
+  const [posts] = await db.execute(
+    "SELECT id, user_id, content, created_at, updated_at FROM posts WHERE user_id = ? ORDER BY created_at DESC",
+    [userId],
+  );
+  return posts;
+};
+
+exports.getPostsByUserId = async (userId) => {
+  const [posts] = await db.execute(
+    "SELECT id, user_id, content, created_at, updated_at FROM posts WHERE user_id = ? ORDER BY created_at DESC",
+    [userId],
+  );
+  return posts;
+};
+
+exports.getFeedPosts = async (userIds) => {
+  const ids = Array.isArray(userIds) ? userIds : [];
+  const normalized = ids
+    .map((id) => Number(id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+
+  const unique = Array.from(new Set(normalized)).slice(0, 200);
+  if (!unique.length) return [];
+
+  const placeholders = unique.map(() => "?").join(",");
+  const [posts] = await db.execute(
+    `SELECT id, user_id, content, created_at, updated_at FROM posts WHERE user_id IN (${placeholders}) ORDER BY created_at DESC`,
+    unique,
+  );
   return posts;
 };
 
@@ -60,17 +93,24 @@ exports.updatePost = async (postId, user) => {
     postId,
   ]);
 
-  await producer.send({
-    topic: "post-events",
-    messages: [
-      {
-        value: JSON.stringify({
-          event: "POST_UPDATED",
-          data: { postId, userId: post.user_id },
-        }),
-      },
-    ],
-  });
+  try {
+    await producer.send({
+      topic: "post-events",
+      messages: [
+        {
+          value: JSON.stringify({
+            event: "POST_UPDATED",
+            data: { postId, userId: post.user_id },
+          }),
+        },
+      ],
+    });
+  } catch (err) {
+    console.error(
+      "[post-service] Kafka publish failed (POST_UPDATED).",
+      err?.stack || err?.message || err,
+    );
+  }
 };
 
 exports.deletePost = async (postId, user) => {
@@ -85,17 +125,24 @@ exports.deletePost = async (postId, user) => {
 
   await db.execute("DELETE FROM posts WHERE id = ?", [postId]);
 
-  await producer.send({
-    topic: "post-events",
-    messages: [
-      {
-        value: JSON.stringify({
-          event: "POST_DELETED",
-          data: { postId, userId: post.user_id },
-        }),
-      },
-    ],
-  });
+  try {
+    await producer.send({
+      topic: "post-events",
+      messages: [
+        {
+          value: JSON.stringify({
+            event: "POST_DELETED",
+            data: { postId, userId: post.user_id },
+          }),
+        },
+      ],
+    });
+  } catch (err) {
+    console.error(
+      "[post-service] Kafka publish failed (POST_DELETED).",
+      err?.stack || err?.message || err,
+    );
+  }
 };
 
 // const db = require("../config/db");
