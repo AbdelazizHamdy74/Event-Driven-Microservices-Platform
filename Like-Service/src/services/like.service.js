@@ -2,6 +2,12 @@ const db = require("../config/db");
 const { producer } = require("../config/kafka");
 const axios = require("axios");
 
+const createError = (message, status) => {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+};
+
 const userInfoCache = new Map();
 const userCacheTtlMs = Number(process.env.USER_CACHE_TTL_MS) || 300000;
 
@@ -155,19 +161,19 @@ const validatePostOwner = async (postOwnerId, authToken) => {
 // };
 
 exports.likePost = async (userId, postId, authToken = "") => {
-  if (!postId) throw new Error("Post is required");
+  if (!postId) throw createError("Post is required", 400);
 
   const post = await fetchPost(postId, authToken);
 
-  if (!post) throw new Error("Post service unavailable");
-  if (!post.exists) throw new Error("Post not found");
+  if (!post) throw createError("Post service unavailable", 503);
+  if (!post.exists) throw createError("Post not found", 404);
 
   const postOwnerId = post.userId;
 
   const actorInfo = await fetchUserInfo(userId, authToken);
 
-  if (!actorInfo) throw new Error("User service unavailable");
-  if (!actorInfo.exists) throw new Error("User not found");
+  if (!actorInfo) throw createError("User service unavailable", 503);
+  if (!actorInfo.exists) throw createError("User not found", 404);
 
   const userName = actorInfo.name || null;
 
@@ -180,7 +186,7 @@ exports.likePost = async (userId, postId, authToken = "") => {
     );
   } catch (err) {
     if (err.code === "ER_DUP_ENTRY") {
-      throw new Error("Already liked");
+      throw createError("Already liked", 409);
     }
     throw err;
   }
@@ -192,35 +198,42 @@ exports.likePost = async (userId, postId, authToken = "") => {
     userId,
   };
 
-  await producer.send({
-    topic: "like-events",
-    messages: [
-      {
-        value: JSON.stringify({
-          event: "POST_LIKED",
-          data: {
-            postId,
-            postOwnerId,
-            fromUserId: userId,
-            fromUserName: userName,
-          },
-        }),
-      },
-    ],
-  });
+  try {
+    await producer.send({
+      topic: "like-events",
+      messages: [
+        {
+          value: JSON.stringify({
+            event: "POST_LIKED",
+            data: {
+              postId,
+              postOwnerId,
+              fromUserId: userId,
+              fromUserName: userName,
+            },
+          }),
+        },
+      ],
+    });
+  } catch (err) {
+    console.error(
+      "[like-service] Kafka publish failed (POST_LIKED); like row was created.",
+      err?.stack || err?.message || err,
+    );
+  }
 
   return like;
 };
 
 exports.unlikePost = async (userId, postId, authToken = "") => {
-  if (!postId) throw new Error("Post is required");
+  if (!postId) throw createError("Post is required", 400);
 
   const [likes] = await db.execute(
     "SELECT post_owner_id FROM likes WHERE post_id = ? AND user_id = ? LIMIT 1",
     [postId, userId],
   );
 
-  if (!likes.length) throw new Error("Like not found");
+  if (!likes.length) throw createError("Like not found", 404);
 
   const postOwnerId = Number(likes[0].post_owner_id);
   const actorInfo = await fetchUserInfo(userId, authToken);
@@ -232,30 +245,37 @@ exports.unlikePost = async (userId, postId, authToken = "") => {
     [postId, userId],
   );
 
-  if (!result.affectedRows) throw new Error("Like not found");
+  if (!result.affectedRows) throw createError("Like not found", 404);
 
-  await producer.send({
-    topic: "like-events",
-    messages: [
-      {
-        value: JSON.stringify({
-          event: "POST_UNLIKED",
-          data: {
-            postId,
-            postOwnerId,
-            fromUserId: userId,
-            fromUserName,
-          },
-        }),
-      },
-    ],
-  });
+  try {
+    await producer.send({
+      topic: "like-events",
+      messages: [
+        {
+          value: JSON.stringify({
+            event: "POST_UNLIKED",
+            data: {
+              postId,
+              postOwnerId,
+              fromUserId: userId,
+              fromUserName,
+            },
+          }),
+        },
+      ],
+    });
+  } catch (err) {
+    console.error(
+      "[like-service] Kafka publish failed (POST_UNLIKED).",
+      err?.stack || err?.message || err,
+    );
+  }
 
   return { message: "Unliked" };
 };
 
 exports.getLikeCount = async (postId) => {
-  if (!postId) throw new Error("Post is required");
+  if (!postId) throw createError("Post is required", 400);
 
   const [rows] = await db.execute(
     "SELECT COUNT(*) AS count FROM likes WHERE post_id = ?",
@@ -263,4 +283,15 @@ exports.getLikeCount = async (postId) => {
   );
 
   return Number(rows[0]?.count || 0);
+};
+
+exports.getMyLikeStatus = async (userId, postId) => {
+  if (!postId) throw createError("Post is required", 400);
+
+  const [rows] = await db.execute(
+    "SELECT id FROM likes WHERE post_id = ? AND user_id = ? LIMIT 1",
+    [postId, userId],
+  );
+
+  return { postId, liked: Boolean(rows.length) };
 };

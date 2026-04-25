@@ -35,3 +35,11 @@ exports.getLikeCount = async (req, res) => {
   const count = await likeService.getLikeCount(Number(req.params.postId));
   res.json({ postId: Number(req.params.postId), count });
 };
+
+exports.getMyLikeStatus = async (req, res) => {
+  const status = await likeService.getMyLikeStatus(
+    req.user.id,
+    Number(req.params.postId),
+  );
+  res.json(status);
+};
