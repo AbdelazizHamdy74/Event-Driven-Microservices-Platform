@@ -12,6 +12,13 @@ exports.getUserById = async (req, res) => {
   res.json(user);
 };
 
+exports.searchUsers = async (req, res) => {
+  const q = typeof req.query.q === "string" ? req.query.q : "";
+  const limit = typeof req.query.limit === "string" ? Number(req.query.limit) : 10;
+  const users = await userService.searchUsers(q, limit);
+  res.json(users);
+};
+
 exports.updateUser = async (req, res) => {
   const requestedId = Number(req.params.id);
   if (req.user.id !== requestedId && req.user.role !== "admin") {

@@ -36,6 +36,18 @@ exports.rejectRequest = async (req, res) => {
   res.json(result);
 };
 
+exports.cancelRequest = async (req, res) => {
+  const result = await friendshipService.cancelRequest(
+    req.user.id,
+    Number(req.params.userId),
+    {
+      userName: req.body.userName,
+    },
+    req.headers.authorization || "",
+  );
+  res.json(result);
+};
+
 exports.blockUser = async (req, res) => {
   const result = await friendshipService.blockUser(
     req.user.id,
@@ -68,4 +80,15 @@ exports.getFriends = async (req, res) => {
     req.headers.authorization || "",
   );
   res.json(friends);
+};
+
+exports.getRequests = async (req, res) => {
+  const direction =
+    typeof req.query.direction === "string" ? req.query.direction : "received";
+  const requests = await friendshipService.getRequests(
+    req.user.id,
+    direction,
+    req.headers.authorization || "",
+  );
+  res.json(requests);
 };

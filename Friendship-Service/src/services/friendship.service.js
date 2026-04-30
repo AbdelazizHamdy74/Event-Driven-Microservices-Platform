@@ -242,6 +242,54 @@ exports.rejectRequest = async (
   return { message: "Request rejected" };
 };
 
+exports.cancelRequest = async (
+  userId,
+  otherUserId,
+  options = {},
+  authToken = "",
+) => {
+  if (!otherUserId) throw new Error("Target user is required");
+  if (userId === otherUserId) throw new Error("Invalid request");
+
+  await ensureTargetUser(otherUserId, authToken);
+
+  const existing = await getRelationship(userId, otherUserId);
+  if (!existing || existing.status !== "PENDING") {
+    throw new Error("No request to cancel");
+  }
+  if (existing.requested_by !== userId) {
+    throw new Error("No request to cancel");
+  }
+
+  await db.execute("DELETE FROM friendships WHERE id = ?", [existing.id]);
+
+  let fromUserName = formatUserName(options.userName);
+  if (!fromUserName) {
+    const actorInfo = await fetchUserInfo(userId, authToken);
+    if (!actorInfo) throw new Error("User service unavailable");
+    if (!actorInfo.exists) throw new Error("User not found");
+    fromUserName = actorInfo.name || "";
+  }
+
+  await producer.send({
+    topic: "friendship-events",
+    messages: [
+      {
+        value: JSON.stringify({
+          event: "FRIEND_REQUEST_CANCELLED",
+          data: {
+            fromUserId: userId,
+            toUserId: otherUserId,
+            fromUserName: fromUserName || null,
+          },
+        }),
+      },
+    ],
+  });
+
+  return { message: "Request cancelled" };
+};
+
 exports.blockUser = async (userId, otherUserId, authToken = "") => {
   if (!otherUserId) throw new Error("Target user is required");
   if (userId === otherUserId) throw new Error("Cannot block yourself");
@@ -377,6 +425,57 @@ exports.getFriends = async (userId, authToken = "") => {
       return {
         id,
         name: info && info.exists ? info.name || null : null,
+      };
+    }),
+  );
+
+  return results;
+};
+
+exports.getRequests = async (userId, direction = "received", authToken = "") => {
+  const dir = direction === "sent" ? "sent" : "received";
+
+  let rows;
+  if (dir === "received") {
+    // Requests where other user requested me
+    [rows] = await db.execute(
+      [
+        "SELECT",
+        "CASE WHEN user1_id = ? THEN user2_id ELSE user1_id END AS other_user_id,",
+        "requested_by",
+        "FROM friendships",
+        "WHERE status = 'PENDING' AND (user1_id = ? OR user2_id = ?) AND requested_by <> ?",
+        "ORDER BY updated_at DESC",
+      ].join(" "),
+      [userId, userId, userId, userId],
+    );
+  } else {
+    // Requests where I requested the other user
+    [rows] = await db.execute(
+      [
+        "SELECT",
+        "CASE WHEN user1_id = ? THEN user2_id ELSE user1_id END AS other_user_id,",
+        "requested_by",
+        "FROM friendships",
+        "WHERE status = 'PENDING' AND (user1_id = ? OR user2_id = ?) AND requested_by = ?",
+        "ORDER BY updated_at DESC",
+      ].join(" "),
+      [userId, userId, userId, userId],
+    );
+  }
+
+  const otherIds = rows
+    .map((r) => Number(r.other_user_id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+
+  const uniqueIds = Array.from(new Set(otherIds));
+  const results = await Promise.all(
+    uniqueIds.map(async (id) => {
+      const info = await fetchUserInfo(id, authToken);
+      return {
+        userId: id,
+        name: info && info.exists ? info.name || null : null,
+        direction: dir,
       };
     }),
   );

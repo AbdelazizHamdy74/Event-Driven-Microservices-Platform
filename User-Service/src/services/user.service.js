@@ -43,6 +43,28 @@ exports.getUserById = async (id) => {
   return rows[0];
 };
 
+exports.searchUsers = async (query, limit = 10) => {
+  const q = typeof query === "string" ? query.trim() : "";
+  if (!q) return [];
+
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 20));
+  const like = `%${q}%`;
+
+  // MySQL prepared statements may not allow binding LIMIT/OFFSET reliably,
+  // so we inject the sanitized integer.
+  const sql = [
+    "SELECT id, name, email",
+    "FROM users",
+    "WHERE name LIKE ? OR email LIKE ?",
+    "ORDER BY id DESC",
+    `LIMIT ${safeLimit}`,
+  ].join(" ");
+
+  const [rows] = await db.execute(sql, [like, like]);
+
+  return rows;
+};
+
 exports.updateUser = async (id, payload = {}) => {
   const fields = [];
   const values = [];
