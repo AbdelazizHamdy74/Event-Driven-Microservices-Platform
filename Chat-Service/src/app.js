@@ -5,8 +5,10 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const chatRoutes = require("./routes/chat.routes");
+const chatMessageRequestRoutes = require("./routes/chat-message-requests.routes");
 const { connectProducer } = require("./config/kafka");
 const chatService = require("./services/chat.service");
+const socketHub = require("./socketHub");
 const { validateUserSession } = require("../../shared/auth/validateUserSession");
 const { createObservability } = require("../../shared/http/observability");
 const { createRateLimiter } = require("../../shared/http/rateLimit");
@@ -32,6 +34,8 @@ app.use(requestLogger);
 app.get("/health", healthHandler);
 app.get("/metrics", metricsHandler);
 
+// More specific prefix first so it is never shadowed by the general /chats router.
+app.use("/chats/message-requests", chatMessageRequestRoutes);
 app.use("/chats", chatRoutes);
 app.use(notFoundHandler);
 app.use(errorHandler);
@@ -44,6 +48,8 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
   },
 });
+
+socketHub.attachIo(io);
 
 io.use(async (socket, next) => {
   const headerAuthorization = socket.handshake.headers?.authorization;
@@ -77,7 +83,7 @@ io.use(async (socket, next) => {
 });
 
 io.on("connection", (socket) => {
-  const userId = socket.user.id;
+  const userId = Number(socket.user.id);
   socket.join(`user:${userId}`);
 
   socket.on("chat:send", async (payload, cb) => {
@@ -119,7 +125,6 @@ io.on("connection", (socket) => {
         authToken,
       );
 
-      io.to(`user:${toUserId}`).emit("chat:new", message);
       socket.emit("chat:sent", message);
 
       if (cb) cb({ ok: true, message });

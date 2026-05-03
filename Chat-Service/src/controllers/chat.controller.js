@@ -12,6 +12,7 @@ exports.getMessages = async (req, res) => {
   const messages = await chatService.getMessages(
     req.user.id,
     Number(req.params.otherUserId),
+    req.headers.authorization || "",
   );
   res.json(messages);
 };
@@ -29,4 +30,36 @@ exports.sendMessage = async (req, res) => {
     req.headers.authorization || "",
   );
   res.status(201).json(message);
+};
+
+exports.listIncomingMessageRequests = async (req, res) => {
+  const rows = await chatService.listIncomingMessageRequests(req.user.id);
+  res.json(rows);
+};
+
+exports.sendMessageRequest = async (req, res) => {
+  const row = await chatService.sendMessageRequest(
+    req.user.id,
+    Number(req.params.toUserId),
+    req.body.content,
+    req.headers.authorization || "",
+  );
+  res.status(201).json(row);
+};
+
+exports.acceptMessageRequest = async (req, res) => {
+  const result = await chatService.acceptMessageRequest(
+    req.user.id,
+    Number(req.params.fromUserId),
+    req.headers.authorization || "",
+  );
+  res.json(result);
+};
+
+exports.declineMessageRequest = async (req, res) => {
+  const result = await chatService.declineMessageRequest(
+    req.user.id,
+    Number(req.params.fromUserId),
+  );
+  res.json(result);
 };

@@ -62,6 +62,16 @@ const startConsumer = async () => {
           };
           break;
 
+        case "MESSAGE_REQUEST_CREATED":
+          notification = {
+            userId: event.data.toUserId,
+            type: "MESSAGE_REQUEST_CREATED",
+            message: event.data.fromUserName
+              ? `${event.data.fromUserName} asked to message you`
+              : `User ${event.data.fromUserId} asked to message you`,
+          };
+          break;
+
         case "COMMENT_CREATED":
           if (event.data.postOwnerId === event.data.fromUserId) break;
           notification = {

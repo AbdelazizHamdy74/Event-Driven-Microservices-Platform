@@ -1,6 +1,7 @@
 const db = require("../config/db");
 const { producer } = require("../config/kafka");
 const axios = require("axios");
+const socketHub = require("../socketHub");
 
 const userInfoCache = new Map();
 const userCacheTtlMs = Number(process.env.USER_CACHE_TTL_MS) || 300000;
@@ -29,6 +30,90 @@ const normalizePair = (a, b) => (a < b ? [a, b] : [b, a]);
 const cleanName = (value) => {
   if (typeof value !== "string") return "";
   return value.trim().slice(0, 150);
+};
+
+const normalizeAuthHeader = (authToken) => {
+  if (!authToken || typeof authToken !== "string") return "";
+  const t = authToken.trim();
+  if (!t) return "";
+  return /^Bearer\s/i.test(t) ? t : `Bearer ${t}`;
+};
+
+const friendshipBaseUrl = () =>
+  process.env.FRIENDSHIP_SERVICE_URL || "http://localhost:3004";
+
+const getFriendshipStatus = async (otherUserId, authToken) => {
+  const authorization = normalizeAuthHeader(authToken);
+  if (!authorization) throw new Error("Authorization required");
+
+  let response;
+  try {
+    response = await axios.get(
+      `${friendshipBaseUrl()}/friendships/status/${otherUserId}`,
+      { timeout: 3000, headers: { Authorization: authorization } },
+    );
+  } catch (err) {
+    if (err.response?.status === 401) throw new Error("Unauthorized");
+    throw new Error("Friendship service unavailable");
+  }
+
+  return response.data?.status;
+};
+
+const hasChatAllowance = async (userId, otherUserId) => {
+  const [user1Id, user2Id] = normalizePair(userId, otherUserId);
+  const [rows] = await db.execute(
+    "SELECT 1 FROM chat_allowances WHERE user1_id = ? AND user2_id = ? LIMIT 1",
+    [user1Id, user2Id],
+  );
+  return rows.length > 0;
+};
+
+const fetchAllowancePartnerIds = async (userId) => {
+  const [rows] = await db.execute(
+    [
+      "SELECT CASE WHEN user1_id = ? THEN user2_id ELSE user1_id END AS oid",
+      "FROM chat_allowances",
+      "WHERE user1_id = ? OR user2_id = ?",
+    ].join(" "),
+    [userId, userId, userId],
+  );
+  return new Set(
+    rows
+      .map((r) => Number(r.oid))
+      .filter((id) => Number.isFinite(id) && id > 0),
+  );
+};
+
+const assertCanChatWith = async (userId, otherUserId, authToken) => {
+  const status = await getFriendshipStatus(otherUserId, authToken);
+  if (status === "FRIENDS") return;
+
+  if (status === "BLOCKED_BY_ME" || status === "BLOCKED_BY_OTHER") {
+    throw new Error("Messaging is not available for this user");
+  }
+  if (await hasChatAllowance(userId, otherUserId)) return;
+  throw new Error("You can only message users you are friends with");
+};
+
+const fetchFriendIds = async (authToken) => {
+  const authorization = normalizeAuthHeader(authToken);
+  if (!authorization) return new Set();
+
+  try {
+    const response = await axios.get(`${friendshipBaseUrl()}/friendships/friends`, {
+      timeout: 5000,
+      headers: { Authorization: authorization },
+    });
+    const list = Array.isArray(response.data) ? response.data : [];
+    return new Set(
+      list
+        .map((f) => Number(f.id))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    );
+  } catch (_err) {
+    throw new Error("Friendship service unavailable");
+  }
 };
 
 const getOrCreateConversation = async (
@@ -138,6 +223,8 @@ exports.sendMessage = async (
     receiverName = cleanName(receiverInfo.name);
   }
 
+  await assertCanChatWith(userId, otherUserId, authToken);
+
   const fallbackConversationName =
     senderName && receiverName ? `${senderName} & ${receiverName}` : "";
 
@@ -166,12 +253,12 @@ exports.sendMessage = async (
 
   const row = rows[0];
   const message = {
-    id: row.id,
-    conversationId: row.conversation_id,
+    id: Number(row.id),
+    conversationId: Number(row.conversation_id),
     conversationName: conversation.name || null,
-    fromUserId: row.sender_id,
+    fromUserId: Number(row.sender_id),
     fromUserName: row.sender_name,
-    toUserId: row.receiver_id,
+    toUserId: Number(row.receiver_id),
     toUserName: row.receiver_name,
     content: row.content,
     createdAt: row.created_at,
@@ -189,10 +276,23 @@ exports.sendMessage = async (
     ],
   });
 
+  socketHub.emitToUser(message.toUserId, "chat:new", message);
+  socketHub.emitToUser(message.toUserId, "notification:new", {
+    type: "CHAT_MESSAGE_CREATED",
+    message: message.fromUserName
+      ? `New message from ${message.fromUserName}`
+      : `New message from user ${message.fromUserId}`,
+    data: { fromUserId: message.fromUserId },
+  });
+
   return message;
 };
 
 exports.getMyConversations = async (userId, authToken = "") => {
+  const friendIds = await fetchFriendIds(authToken);
+  const allowanceIds = await fetchAllowancePartnerIds(userId);
+  const allowedOther = new Set([...friendIds, ...allowanceIds]);
+
   const [rows] = await db.execute(
     `SELECT c.id, c.user1_id, c.user2_id, c.name,
             m.id AS last_message_id,
@@ -212,10 +312,12 @@ exports.getMyConversations = async (userId, authToken = "") => {
     [userId, userId],
   );
 
-  const mapped = rows.map((row) => {
-    const otherUserId = row.user1_id === userId ? row.user2_id : row.user1_id;
-    return { row, otherUserId };
-  });
+  const mapped = rows
+    .map((row) => {
+      const otherUserId = row.user1_id === userId ? row.user2_id : row.user1_id;
+      return { row, otherUserId };
+    })
+    .filter(({ otherUserId }) => allowedOther.has(otherUserId));
 
   const names = await Promise.all(
     mapped.map(({ otherUserId }) => fetchUserName(otherUserId, authToken)),
@@ -238,8 +340,10 @@ exports.getMyConversations = async (userId, authToken = "") => {
   }));
 };
 
-exports.getMessages = async (userId, otherUserId) => {
+exports.getMessages = async (userId, otherUserId, authToken = "") => {
   if (!otherUserId) throw new Error("Receiver is required");
+
+  await assertCanChatWith(userId, otherUserId, authToken);
 
   const [user1Id, user2Id] = normalizePair(userId, otherUserId);
 
@@ -258,14 +362,153 @@ exports.getMessages = async (userId, otherUserId) => {
   );
 
   return rows.map((row) => ({
-    id: row.id,
-    conversationId: row.conversation_id,
+    id: Number(row.id),
+    conversationId: Number(row.conversation_id),
     conversationName: conversation.name,
-    fromUserId: row.sender_id,
+    fromUserId: Number(row.sender_id),
     fromUserName: row.sender_name,
-    toUserId: row.receiver_id,
+    toUserId: Number(row.receiver_id),
     toUserName: row.receiver_name,
     content: row.content,
     createdAt: row.created_at,
   }));
+};
+
+exports.sendMessageRequest = async (userId, toUserId, content, authToken = "") => {
+  const raw = typeof content === "string" ? content.trim() : "";
+  const clean = raw.slice(0, 500);
+  if (!clean) throw new Error("Content is required");
+  if (!toUserId) throw new Error("Receiver is required");
+  if (userId === toUserId) throw new Error("Cannot message yourself");
+
+  const target = await fetchUserInfo(toUserId, authToken);
+  if (!target) throw new Error("User service unavailable");
+  if (!target.exists) throw new Error("Receiver not found");
+
+  const status = await getFriendshipStatus(toUserId, authToken);
+  if (status === "FRIENDS") {
+    throw new Error("You are already friends — open Messages to chat");
+  }
+  if (status === "BLOCKED_BY_ME" || status === "BLOCKED_BY_OTHER") {
+    throw new Error("Messaging is not available for this user");
+  }
+
+  if (await hasChatAllowance(userId, toUserId)) {
+    throw new Error("You can already message this user");
+  }
+
+  const [existing] = await db.execute(
+    "SELECT id FROM message_requests WHERE from_user_id = ? AND to_user_id = ? AND status = 'PENDING'",
+    [userId, toUserId],
+  );
+  if (existing.length) throw new Error("A message request is already pending");
+
+  const [result] = await db.execute(
+    "INSERT INTO message_requests (from_user_id, to_user_id, content, status) VALUES (?, ?, ?, 'PENDING')",
+    [userId, toUserId, clean],
+  );
+
+  const [insertedRows] = await db.execute(
+    "SELECT id, from_user_id, to_user_id, content, status, created_at FROM message_requests WHERE id = ?",
+    [result.insertId],
+  );
+  const ins = insertedRows[0];
+
+  let fromUserName = "";
+  const senderInfo = await fetchUserInfo(userId, authToken);
+  if (senderInfo?.exists) fromUserName = cleanName(senderInfo.name);
+
+  const row = {
+    id: ins.id,
+    fromUserId: ins.from_user_id,
+    toUserId: ins.to_user_id,
+    content: ins.content,
+    status: ins.status,
+    fromUserName: fromUserName || null,
+    createdAt: ins.created_at,
+  };
+
+  await producer.send({
+    topic: "chat-events",
+    messages: [
+      {
+        value: JSON.stringify({
+          event: "MESSAGE_REQUEST_CREATED",
+          data: row,
+        }),
+      },
+    ],
+  });
+
+  socketHub.emitToUser(toUserId, "message:request", row);
+  socketHub.emitToUser(toUserId, "notification:new", {
+    type: "MESSAGE_REQUEST_CREATED",
+    message: fromUserName
+      ? `${fromUserName} asked to message you`
+      : `User ${userId} asked to message you`,
+    data: { fromUserId: userId },
+  });
+
+  return row;
+};
+
+exports.listIncomingMessageRequests = async (userId) => {
+  const [rows] = await db.execute(
+    "SELECT id, from_user_id, to_user_id, content, status, created_at FROM message_requests WHERE to_user_id = ? AND status = 'PENDING' ORDER BY id DESC",
+    [userId],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    fromUserId: r.from_user_id,
+    toUserId: r.to_user_id,
+    content: r.content,
+    status: r.status,
+    createdAt: r.created_at,
+  }));
+};
+
+exports.acceptMessageRequest = async (userId, fromUserId, authToken = "") => {
+  if (!fromUserId) throw new Error("Sender is required");
+  const [rows] = await db.execute(
+    "SELECT id FROM message_requests WHERE to_user_id = ? AND from_user_id = ? AND status = 'PENDING'",
+    [userId, fromUserId],
+  );
+  if (!rows.length) throw new Error("No pending message request");
+
+  const status = await getFriendshipStatus(fromUserId, authToken);
+  if (status === "BLOCKED_BY_ME" || status === "BLOCKED_BY_OTHER") {
+    throw new Error("Messaging is not available for this user");
+  }
+
+  await db.execute("UPDATE message_requests SET status = 'ACCEPTED' WHERE id = ?", [
+    rows[0].id,
+  ]);
+
+  const [user1Id, user2Id] = normalizePair(userId, fromUserId);
+  await db.execute(
+    "INSERT IGNORE INTO chat_allowances (user1_id, user2_id) VALUES (?, ?)",
+    [user1Id, user2Id],
+  );
+
+  socketHub.emitToUser(fromUserId, "message:request:resolved", {
+    accepted: true,
+    withUserId: userId,
+  });
+
+  return { message: "Accepted — you can now exchange messages" };
+};
+
+exports.declineMessageRequest = async (userId, fromUserId) => {
+  const [result] = await db.execute(
+    "UPDATE message_requests SET status = 'DECLINED' WHERE to_user_id = ? AND from_user_id = ? AND status = 'PENDING'",
+    [userId, fromUserId],
+  );
+  if (!result.affectedRows) throw new Error("No pending message request");
+
+  socketHub.emitToUser(fromUserId, "message:request:resolved", {
+    accepted: false,
+    withUserId: userId,
+  });
+
+  return { message: "Declined" };
 };
